@@ -1,0 +1,149 @@
+falco-nike-setup/
+├── falco-values.yaml
+├── falco-rules-nike.yaml
+├── falco-slack-webhook.yaml
+├── slack-output-configmap.yaml
+├── install.sh
+└── README.md
+
+---
+
+# falco-values.yaml
+falco:
+  jsonOutput: true
+  logLevel: info
+  grpc:
+    enabled: true
+  grpcOutput:
+    enabled: true
+
+customRules:
+  falco-rules-nike.yaml: |
+    - rule: Shell Access in Payment Pod
+      desc: Detect shell access in payment-service pod
+      condition: spawned_process and container and proc.name in (bash, sh) and k8s.pod.name contains "payment"
+      output: "Shell detected in payment pod! user=%user.name pod=%k8s.pod.name cmd=%proc.cmdline"
+      priority: CRITICAL
+      tags: [security, payment]
+
+  falco-rules.yaml: {}
+
+extraVolumes:
+  - name: falco-rules-nike
+    configMap:
+      name: falco-rules-nike
+
+extraVolumeMounts:
+  - mountPath: /etc/falco/falco-rules-nike.yaml
+    name: falco-rules-nike
+    subPath: falco-rules-nike.yaml
+    readOnly: true
+
+---
+
+# falco-rules-nike.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-rules-nike
+  namespace: falco
+
+data:
+  falco-rules-nike.yaml: |
+    - rule: Shell Access in Payment Pod
+      desc: Detect shell access in payment-service pod
+      condition: spawned_process and container and proc.name in (bash, sh) and k8s.pod.name contains "payment"
+      output: "Shell detected in payment pod! user=%user.name pod=%k8s.pod.name cmd=%proc.cmdline"
+      priority: CRITICAL
+      tags: [security, payment]
+
+    - rule: Wget in Any Service
+      desc: Detect wget usage
+      condition: spawned_process and proc.name = wget
+      output: "Wget detected in container (cmd=%proc.cmdline container=%container.id)"
+      priority: WARNING
+      tags: [network]
+
+---
+
+# falco-slack-webhook.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: falco-slack-webhook
+  namespace: falco
+
+type: Opaque
+data:
+  webhook_url: <base64-encoded-Slack-Webhook-URL>
+
+---
+
+# slack-output-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-sidekick-config
+  namespace: falco
+
+data:
+  config.yaml: |
+    slack:
+      webhookurl: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+      outputformat: "fields"
+      minimumpriority: "informational"
+
+---
+
+# install.sh
+#!/bin/bash
+
+helm repo add falcosecurity https://falcosecurity.github.io/charts
+helm repo update
+
+kubectl create namespace falco
+kubectl apply -f falco-rules-nike.yaml
+kubectl apply -f falco-slack-webhook.yaml
+kubectl apply -f slack-output-configmap.yaml
+
+helm install falco falcosecurity/falco \
+  --namespace falco \
+  -f falco-values.yaml
+
+---
+
+# README.md
+# Falco Setup for Nike E-Commerce Project
+
+## 📌 Overview
+This setup deploys Falco with custom rules for your microservices and sends alerts to Slack.
+
+## 🚀 Deploy Steps
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+## 🛡️ Custom Rules
+- Shell access detection for payment-service
+- Detect wget use in any pod
+
+## 📣 Slack Integration
+- Replace `webhook_url` in `falco-slack-webhook.yaml` with your Base64 encoded Slack webhook.
+- Or modify the `slack-output-configmap.yaml` directly.
+
+## 📄 Files
+| File | Purpose |
+|------|---------|
+| falco-values.yaml | Custom Helm values for Falco |
+| falco-rules-nike.yaml | Custom Falco detection rules |
+| falco-slack-webhook.yaml | Secret containing Slack webhook |
+| slack-output-configmap.yaml | Sidekick config for Slack alerts |
+| install.sh | Script to deploy all components |
+
+## ✅ Next Steps
+- Validate alerts by running a bash shell inside the payment pod.
+```bash
+kubectl exec -it <payment-pod> -- /bin/bash
+```
+- Check Slack for real-time alert.
